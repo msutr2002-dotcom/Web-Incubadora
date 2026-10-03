@@ -180,6 +180,25 @@ body {
   color: #fcd9a0;
 }
 
+.note {
+  display: block;
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin-bottom: 14px;
+  background: rgb(56 189 248 / 9%);
+  border: 1px solid rgb(56 189 248 / 30%);
+  color: #bfe6f8;
+}
+
+.note code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgb(0 0 0 / 25%);
+  font-size: 0.8em;
+}
+
 .alert {
   display: flex;
   align-items: center;
@@ -633,6 +652,18 @@ body {
   .span-2 {
     grid-column: auto;
   }
+  .topbar {
+    gap: 10px;
+  }
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .topbar-actions .btn {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 10px 12px;
+  }
   .log-item {
     grid-template-columns: 64px 1fr;
   }
@@ -648,6 +679,10 @@ body {
   }
   .alert-actions .btn {
     flex: 1;
+  }
+  .warn,
+  .note {
+    font-size: 0.82rem;
   }
 }
 

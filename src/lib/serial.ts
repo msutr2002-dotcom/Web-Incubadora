@@ -7,7 +7,11 @@ interface SerialPortLike {
   writable: WritableStream<Uint8Array> | null;
   addEventListener(type: 'disconnect', listener: () => void): void;
   removeEventListener(type: 'disconnect', listener: () => void): void;
-  getInfo?: () => { usbVendorId?: number; usbProductId?: number };
+  getInfo?: () => {
+    usbVendorId?: number;
+    usbProductId?: number;
+    bluetoothServiceClassId?: number | string;
+  };
 }
 
 interface SerialApi {
@@ -27,6 +31,8 @@ export function isWebSerialSupported(): boolean {
 
 function portLabel(port: SerialPortLike, baudRate: number): string {
   const info = port.getInfo?.();
+  // Bluetooth Clásico (SPP/RFCOMM): el HC-05 emparejado en Android o en el PC.
+  if (info?.bluetoothServiceClassId !== undefined) return 'Bluetooth · RFCOMM (SPP)';
   if (info?.usbVendorId !== undefined) {
     const hex = (n: number) => n.toString(16).padStart(4, '0');
     return `USB ${hex(info.usbVendorId)}:${hex(info.usbProductId ?? 0)}`;
@@ -132,7 +138,11 @@ export class SerialLink implements Link {
   async connect(options: ConnectOptions = {}): Promise<void> {
     const baudRate = options.baudRate ?? 115200;
     const serial = getSerial();
-    if (!serial) throw new Error('Este navegador no soporta Web Serial. Usa Chrome u Opera en escritorio.');
+    if (!serial) {
+      throw new Error(
+        'Este navegador no expone Web Serial. Usa Chrome/Opera en escritorio, o Chrome 138+ en Android (HC-05 por Bluetooth).',
+      );
+    }
 
     this.setStatus('connecting');
     this.disconnect(true);

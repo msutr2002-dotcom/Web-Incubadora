@@ -10,7 +10,7 @@ Soporta **dos transportes** en la misma app:
 | Transport | Módulo | API | Dónde funciona |
 | --- | --- | --- | --- |
 | **Bluetooth LE** | ESP32, HM-10, JDY-08 | Web Bluetooth | Móvil y escritorio (Chrome/Opera) |
-| **Puerto serie** | **HC-05** + dongle USB | Web Serial | Solo escritorio (Chrome/Opera) |
+| **Puerto serie** | **HC-05** | Web Serial | Escritorio (USB/COM) y **Android 138+** (Bluetooth emparejado) |
 
 ---
 
@@ -19,16 +19,20 @@ Soporta **dos transportes** en la misma app:
 | Navegador | Web Bluetooth | Web Serial |
 | --- | --- | --- |
 | Chrome escritorio / Opera | ✅ | ✅ |
-| Chrome Android | ✅ | ❌ |
+| Chrome Android 138+ | ✅ | ✅ (Bluetooth clásico / SPP) |
+| Chrome Android < 138 | ✅ | ❌ |
 | Safari (iOS/macOS) | ❌ | ❌ |
 | Firefox | ❌ | ❌ |
 
 Ambas APIs requieren **HTTPS**. Vercel lo cumple automáticamente.
 
 > **Sobre el HC-05:** usa Bluetooth *Clásico* (SPP), incompatible con Web Bluetooth.
-> Por eso la app incluye **Web Serial**: el HC-05 se ve como un **puerto COM** en el PC
-> (dongle USB o adaptador CH340/FT232) y la app lo lee igual que cualquier cable serie.
-> En móvil, con HC-05, no hay solución web: usa ESP32 / HM-10.
+> La app lo cubre con **Web Serial**:
+>
+> - **Escritorio:** el HC-05 se ve como un **puerto COM** (dongle USB o adaptador CH340/FT232).
+> - **Android 138+:** Chrome lista los **dispositivos Bluetooth ya emparejados** y abre el SPP del HC-05
+>   directamente desde el navegador (el baudaje se ignora en Bluetooth).
+> - **iPhone:** no hay soporte (Safari no expone Web Serial ni Web Bluetooth).
 
 ---
 
@@ -46,7 +50,7 @@ Dos montajes válidos:
 HC-05 TX/RX → adaptador USB-TTL (CH340/FT232) → puerto COM
 ```
 
-Pasos en la app:
+Pasos en la app (escritorio):
 
 1. Abre la app en **Chrome/Opera de escritorio**.
 2. Pulsa **Conectar Serie**, elige el puerto COM del HC-05.
@@ -54,6 +58,26 @@ Pasos en la app:
 4. Ya llegan líneas: `HUM:…,TEMP:…,STATE:…`.
 
 > Web Serial recuerda el último baudaje usado (`localStorage`).
+
+---
+
+## 2b. Conectar el HC-05 desde un teléfono (Android)
+
+Funciona con **Chrome 138 o superior** en Android, sin instalar nada:
+
+1. **Empareja** el HC-05 en *Ajustes → Bluetooth* (PIN `1234` o `0000`). Chrome solo lista
+   los dispositivos ya emparejados.
+2. Abre la URL de la app (HTTPS) en Chrome y pulsa **Conectar Serie**.
+3. Elige tu módulo en el selector. En el panel aparece como `Bluetooth · RFCOMM (SPP)`.
+4. El baudaje no importa en Bluetooth; déjalo en `9600`.
+
+Notas:
+
+- El HC-05 admite **una sola conexión**: no puede estar emparejado a la vez con el PC y la app.
+- Si el enlace cae y el navegador no avisa (en Android no siempre llega el evento `disconnect`),
+  la app lo detecta sola: avisa a los **6 s sin datos** y a los **15 s** lanza la alerta
+  *Conexión perdida*.
+- En iPhone no funciona (Safari no expone Web Serial). Alternativas: ESP32/HM-10 por BLE, o el PC.
 
 ---
 
@@ -125,11 +149,13 @@ los bytes crudos que llegan del módulo, y un campo **«Pega una línea para pro
 | **Humedad fuera de rango** | Umbral configurable + histéresis (app y firmware) | Aviso sonoro y visual hasta volver a rango |
 | **Temperatura fuera de rango** | `ALERT:TEMP_HIGH/LOW` o frase "¡ALERTA! Temperatura…" | Crítica; se limpia al volver a 36–38.5 °C |
 | **LOCKDOWN / HATCH** | Línea `ALERT:...`, `STATE:HATCH` o frase libre | Hasta pulsar **Reconocer** |
-| **Conexión perdida** | `gattserverdisconnected` o cierre del puerto serie | Crítico; se limpia al reconectar |
+| **Conexión perdida** | `gattserverdisconnected`, cierre del puerto serie o **15 s sin líneas** (vigía) | Crítico; se limpia al reconectar |
 | **Silencio / Reconocer** | Usuario | `Reconocer` calla la alerta actual sin borrar el registro |
 
 Umbrales por defecto: **65–85 % HR** con histéresis de 2 (ajustables en la tarjeta
 *Ajustes y umbrales*). El baudaje y los umbrales se guardan en `localStorage`.
+Cambiar un umbral **rearma** la alerta de humedad y la evalúa al instante con la
+última lectura, sin esperar a la siguiente línea del módulo.
 
 ---
 
@@ -177,7 +203,7 @@ src/
   components/              Sparkline, AlertBanner, EventLog
   lib/link.ts              interfaz de transporte + ensamblador de líneas
   lib/bluetooth.ts         transporte BLE (NUS / HM-10)
-  lib/serial.ts            transporte Web Serial (HC-05 por puerto COM)
+  lib/serial.ts            transporte Web Serial (HC-05 por COM en PC o Bluetooth en Android)
   lib/protocol.ts          parser de líneas y catálogo de alertas
   lib/audio.ts             alarmas sintetizadas con Web Audio API
   lib/thresholds.ts        umbrales con persistencia local

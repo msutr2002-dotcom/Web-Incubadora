@@ -23,6 +23,12 @@ type Source = 'none' | 'bt' | 'serial' | 'demo';
 const MAX_POINTS = 90;
 const MAX_EVENTS = 150;
 
+// Android (Web Serial sobre Bluetooth clásico) no emite siempre el evento
+// `disconnect` cuando se cae el enlace: si dejan de llegar líneas, se marca
+// la conexión como perdida y se lanza la alerta correspondiente.
+const STALE_AFTER_MS = 6000;
+const LOST_AFTER_MS = 15000;
+
 function uid(): string {
   const c = crypto as Crypto & { randomUUID?: () => string };
   return c.randomUUID ? c.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -47,6 +53,7 @@ export default function App() {
   const [thresholds, setThresholds] = useState<Thresholds>(() => loadThresholds());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [staleFor, setStaleFor] = useState(0);
   const [command, setCommand] = useState('');
   const [probeLine, setProbeLine] = useState('');
   const [presets, setPresets] = useState<string[]>(SERVICE_PRESETS.map((p) => p.id));
@@ -71,6 +78,9 @@ export default function App() {
   thresholdsRef.current = thresholds;
   const sourceRef = useRef<Source>(source);
   sourceRef.current = source;
+  const statusRef = useRef<BleStatus>(status);
+  statusRef.current = status;
+  const lastDataRef = useRef<number>(Date.now());
   const activeAlertRef = useRef<AlertEvent | null>(null);
   activeAlertRef.current = activeAlert;
   const ackedRef = useRef<Set<AlertKind>>(new Set());
@@ -117,6 +127,7 @@ export default function App() {
 
   const consumeLine = useCallback(
     (line: string) => {
+      lastDataRef.current = Date.now();
       const parsed = parseLine(line);
       if (!parsed) return;
 
@@ -271,6 +282,31 @@ export default function App() {
     link?.disconnect();
     wasConnectedRef.current = false;
   }, []);
+
+  // Vigila el enlace vivo: si dejan de llegar líneas se avisa («sin datos») y,
+  // si persiste, se da por perdido para que salte la alerta de desconexión.
+  useEffect(() => {
+    const live = source === 'bt' || source === 'serial';
+    if (!live) {
+      setStaleFor(0);
+      lastDataRef.current = Date.now();
+      return;
+    }
+    lastDataRef.current = Date.now();
+    const id = window.setInterval(() => {
+      const idle = Date.now() - lastDataRef.current;
+      if (idle < STALE_AFTER_MS) {
+        setStaleFor(0);
+        return;
+      }
+      setStaleFor(idle);
+      if (idle >= LOST_AFTER_MS && statusRef.current === 'connected') {
+        // Al pasar a `idle`, handleStatus lanza la alerta de desconexión.
+        activeLinkRef.current?.disconnect();
+      }
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [source]);
 
   useEffect(() => {
     return () => {
@@ -496,22 +532,44 @@ export default function App() {
 
       {!anySupported && source !== 'demo' && (
         <div className="warn">
-          Este navegador no expone Web Bluetooth ni Web Serial. Ábrelo en Chrome u Opera, o usa el modo Demo para
-          probar la interfaz.
+          Este navegador no expone Web Bluetooth ni Web Serial. Ábrelo en Chrome (escritorio o Android 138+), Opera,
+          o usa el modo Demo para probar la interfaz. En iPhone/Safari no hay soporte.
         </div>
       )}
 
       {bleSupported && !serialSupported && !isMobile && source !== 'demo' && (
         <div className="warn">
           Este navegador no expone Web Serial: la conexión por puerto serie (HC-05 + dongle USB) solo funciona en
-          Chrome/Opera de escritorio. Desde el móvil usa Bluetooth LE (ESP32 / HM-10).
+          Chrome/Opera de escritorio.
+        </div>
+      )}
+
+      {bleSupported && !serialSupported && isMobile && source !== 'demo' && (
+        <div className="note">
+          Tu navegador no expone Web Serial: para el HC-05 necesitas <strong>Chrome 138 o superior</strong> en Android.
+          Con ESP32 / HM-10 puedes usar «Conectar Bluetooth» (BLE).
         </div>
       )}
 
       {!bleSupported && serialSupported && source !== 'demo' && (
-        <div className="warn">
-          Web Bluetooth no está disponible aquí. Puedes usar <strong>Conectar Serie</strong> con el HC-05 conectado a
-          un dongle USB, o el modo Demo.
+        <div className="note">
+          Web Bluetooth no está disponible aquí. Puedes usar <strong>Conectar Serie</strong> con el HC-05, o el modo
+          Demo.
+        </div>
+      )}
+
+      {serialSupported && isMobile && source !== 'serial' && source !== 'demo' && (
+        <div className="note">
+          <strong>HC-05 desde el móvil:</strong> primero empareja el módulo en Ajustes → Bluetooth (PIN{' '}
+          <code>1234</code> o <code>0000</code>), vuelve aquí y pulsa «Conectar Serie». Chrome solo lista los
+          dispositivos ya emparejados.
+        </div>
+      )}
+
+      {(source === 'bt' || source === 'serial') && staleFor > 0 && (
+        <div className="warn" role="status">
+          Sin datos del módulo hace {Math.round(staleFor / 1000)} s. Si llega a {Math.round(LOST_AFTER_MS / 1000)} s
+          se da por perdida la conexión.
         </div>
       )}
 
